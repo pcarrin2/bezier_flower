@@ -2,12 +2,54 @@ import cairo
 import math
 import random
 
+# aww hell yeah we got globals :(
 radius = 200
 margin = 100
 num_points = 6
 ctrl_radius = 100
 
 side_length = 2*(radius+margin)
+
+def draw_annotations(context, points, ctrl_pts):
+    # draw circle in grey
+    context.set_source_rgb(0.5, 0.5, 0.5)
+    context.set_line_width(2)
+    context.set_line_join(cairo.LineJoin.ROUND)
+    context.arc(*center, radius, 0, 2*math.pi)
+    context.stroke()
+
+    # draw points and control radii in red
+    context.set_source_rgb(1, 0, 0)
+
+    for p in points:
+        print(p)
+        context.arc(*p, 5, 0, 2*math.pi)
+        context.fill()
+        context.arc(*p, ctrl_radius, 0, 2*math.pi)
+        context.stroke()
+
+    # draw control points in green/blue
+    green = True
+    for p in ctrl_pts:
+        if green:
+            context.set_source_rgb(0,1,0)
+            green = False
+        else:
+            context.set_source_rgb(0,0,1)
+            green = True
+        print(p)
+        context.arc(*p, 5, 0, 2*math.pi)
+        context.fill()
+
+    # draw bounding boxes in transparent grey
+    for i in range(num_points):
+        context.set_source_rgba(0,0,0,0.2)
+        context.move_to(*points[i-1])
+        context.line_to(*ctrl_pts[2*i])
+        context.line_to(*points[i])
+        context.line_to(*ctrl_pts[2*i+1])
+        context.line_to(*points[i-1])
+        context.fill()
 
 # creating a SVG surface
 with cairo.SVGSurface("out.svg", side_length, side_length) as surface:
@@ -26,32 +68,6 @@ with cairo.SVGSurface("out.svg", side_length, side_length) as surface:
 
     context = cairo.Context(surface)
     
-    context.set_source_rgb(0.5, 0.5, 0.5)
-    context.set_line_width(2)
-    context.set_line_join(cairo.LineJoin.ROUND)
-    context.arc(*center, radius, 0, 2*math.pi)
-    context.stroke()
-
-    context.set_source_rgb(1, 0, 0)
-
-    for p in points:
-        print(p)
-        context.arc(*p, 5, 0, 2*math.pi)
-        context.fill()
-        context.arc(*p, ctrl_radius, 0, 2*math.pi)
-        context.stroke()
-
-    green = True
-    for p in ctrl_pts:
-        if green:
-            context.set_source_rgb(0,1,0)
-            green = False
-        else:
-            context.set_source_rgb(0,0,1)
-            green = True
-        print(p)
-        context.arc(*p, 5, 0, 2*math.pi)
-        context.fill()
 
     context.set_source_rgb(0,0,0)
     context.set_line_width(2)
@@ -65,13 +81,8 @@ with cairo.SVGSurface("out.svg", side_length, side_length) as surface:
         context.curve_to(*ctrl_pts[2*i], *ctrl_pts[2*i+1], *points[i])
     context.stroke()
 
-    for i in range(num_points):
-        context.set_source_rgba(0,0,0,0.2)
-        context.move_to(*points[i-1])
-        context.line_to(*ctrl_pts[2*i])
-        context.line_to(*ctrl_pts[2*i+1])
-        context.line_to(*points[i])
-        context.fill()
+    draw_annotations(context, points, ctrl_pts)
+
 
 
 # printing message when file is saved
