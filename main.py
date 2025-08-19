@@ -3,11 +3,11 @@ import math
 import random
 
 # aww hell yeah we got globals :(
-radius = 200
-margin = 100
-num_points = 6
-ctrl_radius = 100
+radius = 150
+margin = 200
+num_points = 10
 
+ctrl_radius = radius * math.sin(2 * math.pi/num_points)
 side_length = 2*(radius+margin)
 
 def draw_annotations(context, points, ctrl_pts):
@@ -81,7 +81,7 @@ with cairo.SVGSurface("out.svg", side_length, side_length) as surface:
         context.curve_to(*ctrl_pts[2*i], *ctrl_pts[2*i+1], *points[i])
     context.stroke()
 
-    draw_annotations(context, points, ctrl_pts)
+    #draw_annotations(context, points, ctrl_pts)
 
 
 
