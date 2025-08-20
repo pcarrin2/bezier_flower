@@ -4,12 +4,27 @@ import random
 from sys import argv
 
 # aww hell yeah we got globals :(
-radius = 150
+radius_min = 0
+radius_max = 150
+steps = 100
+
+radii = [radius_max - i * (radius_max-radius_min)/steps for i in range(steps)] 
+
 margin = 200
 num_points = int(argv[1])
+side_length = 2*(radius_max+margin)
+center = (radius_max+margin, radius_max+margin)
 
-ctrl_radius = radius * math.sin(2*math.pi/num_points)
-side_length = 2*(radius+margin)
+ctrl_angles_start = [i*(2*math.pi/num_points) - math.pi*random.random()/2 for i in range(num_points)]
+ctrl_angles_finish = [i*(2*math.pi/num_points) - math.pi*random.random()/2 for i in range(num_points)]
+ctrl_angles_steps = []
+for i in range(steps):
+    ctrl_angles_steps.append([ctrl_angles_start[j] + i*(ctrl_angles_finish[j]-ctrl_angles_start[j])/steps for j in range(num_points)])
+
+
+
+def ctrl_radius(radius):
+    return radius * math.sin(2*math.pi/num_points)
 
 # determine whether points p1 and p2 are on the same side of the segment defined by
 # s1 and s2. returns True for same side, False for opposite sides.
@@ -17,7 +32,7 @@ side_length = 2*(radius+margin)
 def same_side(s1, s2, p1, p2):
     return ((s1[1]-s2[1])*(p1[0]-s1[0])+(s2[0]-s1[0])*(p1[1]-s1[1]))*((s1[1]-s2[1])*(p2[0]-s1[0])+(s2[0]-s1[0])*(p2[1]-s1[1]))>0
 
-def draw_annotations(context, points, ctrl_pts):
+def draw_annotations(context, points, ctrl_pts, radius, center):
     # draw circle in grey
     context.set_source_rgb(0.5, 0.5, 0.5)
     context.set_line_width(2)
@@ -31,7 +46,7 @@ def draw_annotations(context, points, ctrl_pts):
     for p in points:
         context.arc(*p, 5, 0, 2*math.pi)
         context.fill()
-        context.arc(*p, ctrl_radius, 0, 2*math.pi)
+        context.arc(*p, ctrl_radius(radius), 0, 2*math.pi)
         context.stroke()
 
     # draw control points in green/blue
@@ -67,35 +82,35 @@ def draw_annotations(context, points, ctrl_pts):
 
 # creating a SVG surface
 with cairo.SVGSurface("out.svg", side_length, side_length) as surface:
-    # defining points evenly spaced along circle
-    center = (radius+margin, radius+margin)
-    points = [(center[0] + radius*math.cos(i*(2*math.pi/num_points)), center[1] + radius*math.sin(i*(2*math.pi/num_points))) for i in range(num_points)]
-    ctrl_angles = [i*(2*math.pi/num_points) - math.pi*random.random()/2 for i in range(num_points)]
-    ctrl_pts = []
-    for i in range(num_points):
-        ctrl_pts.append(
-                (points[i][0] + ctrl_radius*math.cos(ctrl_angles[i]), 
-                 points[i][1] + ctrl_radius*math.sin(ctrl_angles[i])))
-        ctrl_pts.append(
-                (points[i][0] - ctrl_radius*math.cos(ctrl_angles[i]),
-                 points[i][1] - ctrl_radius*math.sin(ctrl_angles[i])))
-
     context = cairo.Context(surface)
-    
+    for step in range(steps):
+        radius = radii[step] 
+        ctrl_angles = ctrl_angles_steps[step]
+        # points along big circle
+        points = [(center[0] + radius*math.cos(i*(2*math.pi/num_points)), center[1] + radius*math.sin(i*(2*math.pi/num_points))) for i in range(num_points)]
+        
+        ctrl_pts = []
+        for i in range(num_points):
+            ctrl_pts.append(
+                    (points[i][0] + ctrl_radius(radius)*math.cos(ctrl_angles[i]), 
+                     points[i][1] + ctrl_radius(radius)*math.sin(ctrl_angles[i])))
+            ctrl_pts.append(
+                    (points[i][0] - ctrl_radius(radius)*math.cos(ctrl_angles[i]),
+                     points[i][1] - ctrl_radius(radius)*math.sin(ctrl_angles[i])))
 
-    context.set_source_rgb(0,0,0)
-    context.set_line_width(2)
-    context.set_line_join(cairo.LineJoin.ROUND)
-    
-    context.move_to(*points[0])
-    points.append(points.pop(0))
-    ctrl_pts.append(ctrl_pts.pop(0))
-    # Drawing Curve
-    for i in range(num_points):
-        context.curve_to(*ctrl_pts[2*i], *ctrl_pts[2*i+1], *points[i])
-    context.stroke()
+        context.set_source_rgba(0,0,0,0.2)
+        context.set_line_width(1)
+        context.set_line_join(cairo.LineJoin.ROUND)
+        
+        context.move_to(*points[0])
+        points.append(points.pop(0))
+        ctrl_pts.append(ctrl_pts.pop(0))
+        # Drawing Curve
+        for i in range(num_points):
+            context.curve_to(*ctrl_pts[2*i], *ctrl_pts[2*i+1], *points[i])
+        context.stroke()
 
-    draw_annotations(context, points, ctrl_pts)
+        #draw_annotations(context, points, ctrl_pts, radius, center)
 
 
 
