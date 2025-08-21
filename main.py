@@ -17,6 +17,7 @@ margin = 100 # pixels around border
 opacity = 20 # out of 255
 rendering_passes = [(0.1, (1, 0, 0)), (0.5, (0, 1, 0)), (0.2, (0, 0, 1)), (0.0, (1, 1, 1))] # (noise as stdev of bezier param, (R, G, B))
 time_steps = 100 # time steps in animation
+ndots = 50 # number of dots created during a single pass while rasterizing a single bezier curve
 
 # geometry of canvas
 side_length = 2*(radius_max+margin)
@@ -66,7 +67,7 @@ for time_step in range(time_steps):
                 ]
 
 print("Restructuring data...")
-bezier_curves_per_frame = np.asfortranarray(np.empty((time_steps, steps*num_points, 2, 4)))
+bezier_curves_per_frame = np.empty((time_steps, steps*num_points, 2, 4))
 
 # shitty way which i will make fast
 for time_step in range(time_steps):
@@ -82,16 +83,19 @@ print("Constructing image frames...")
 
 # fixing colors: multiplying by opacity
 rendering_passes = [(p[0], (int(opacity*p[1][0]), int(opacity*p[1][1]), int(opacity*p[1][2]))) for p in rendering_passes]
+bezier_param_values = np.arange(0, 1, 1.0/ndots)
 
-def draw_curve(pixels, nodes, rendering_passes, ndots):
+def draw_curve(pixels, nodes, rendering_passes, bezier_param_values):
     curve = bezier.Curve(nodes, degree=3)
     for p in rendering_passes:
         noise = p[0]
         color = p[1]
-        for s in np.arange(0, 1, 1.0/ndots):
-            px = curve.evaluate(np.random.normal(s, noise))
-            x = int(px[0][0])
-            y = int(px[1][0])
+        noise = np.random.normal(0, noise, len(bezier_param_values))
+        bezier_param_with_noise = bezier_param_values + noise
+        bezier_pixels = curve.evaluate_multi(bezier_param_with_noise)
+        for px in np.transpose(bezier_pixels):
+            x = int(px[0])
+            y = int(px[1])
             try:
                 current_px = pixels[x,y]
                 pixels[x,y] = (current_px[0]+color[0], current_px[1]+color[1], current_px[2]+color[2])
@@ -105,7 +109,7 @@ for time_step in range(time_steps):
     px = im.load()
 
     for curve in bezier_curves_per_frame[time_step]:
-        draw_curve(px, curve, rendering_passes, 50)
+        draw_curve(px, curve, rendering_passes, bezier_param_values)
 
     im.save(f"out_{time_step}.png")
 
