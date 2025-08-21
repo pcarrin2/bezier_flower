@@ -1,61 +1,119 @@
 import cairo
 import math
-import random
 from sys import argv
-from draw_bezier import draw_curve
 from PIL import Image
+import bezier
+import numpy as np
+from apng import APNG
+import random
 
-# aww hell yeah we got globals :(
-radius_min = 100
-radius_max = 300
-steps = 200
+print("Processing constant parameters...")
+# global params, edit these
+num_points = int(argv[1]) # number of symmetric nodes to create around a circle
+radius_min = 100 # pixels, inner radius
+radius_max = 500 # pixels, outer radius
+steps = 400 # number of steps between inner and outer radius
+margin = 100 # pixels around border
+opacity = 20 # out of 255
+rendering_passes = [(0.1, (1, 0, 0)), (0.5, (0, 1, 0)), (0.2, (0, 0, 1)), (0.0, (1, 1, 1))] # (noise as stdev of bezier param, (R, G, B))
+time_steps = 100 # time steps in animation
 
-radii = [radius_max - i * (radius_max-radius_min)/steps for i in range(steps)] 
-
-margin = 100
-num_points = int(argv[1])
+# geometry of canvas
 side_length = 2*(radius_max+margin)
 center = (radius_max+margin, radius_max+margin)
 
-#ctrl_angles_start = [i*(2*math.pi/num_points) - math.pi*random.random()/2 for i in range(num_points)]
-ctrl_angles_start = [i*(2*math.pi/num_points) - 2*math.pi*random.random() for i in range(num_points)]
-#ctrl_angles_finish = [i*(2*math.pi/num_points) - math.pi*random.random()/2 for i in range(num_points)]
-ctrl_angles_finish = [i*(2*math.pi/num_points) - math.pi/2 for i in range(num_points)]
-ctrl_angles_steps = []
-for i in range(steps):
-    ctrl_angles_steps.append([ctrl_angles_start[j] + i*(ctrl_angles_finish[j]-ctrl_angles_start[j])/steps for j in range(num_points)])
+print("Creating arrays for bezier curves...")
 
+print("-> Radii")
+radii = [radius_max - i * (radius_max-radius_min)/steps for i in range(steps)] 
 
-def ctrl_radius(radius):
+print("-> Endpoints")
+endpoints_start = [(center[0] + radius_max*math.cos(i*(2*math.pi/num_points)), center[1] + radius_max*math.sin(i*(2*math.pi/num_points))) for i in range(num_points)]
+endpoints_end = [(center[0] + radius_min*math.cos(i*(2*math.pi/num_points)), center[1] + radius_min*math.sin(i*(2*math.pi/num_points))) for i in range(num_points)]
+endpoints = np.linspace(endpoints_start, endpoints_end, num=steps)
+
+print("-> Control Angles")
+#control_angles_start = [i*(2*math.pi/num_points) + math.pi*random.random()/2 for i in range(num_points)]
+control_angles_start = [2*math.pi*random.random() for i in range(num_points)]
+#control_angles_end = [i*(2*math.pi/num_points) + math.pi*random.random()/2 for i in range(num_points)]
+control_angles_end = [i*(2*math.pi/num_points) + math.pi/2 for i in range(num_points)]
+
+control_angles = np.empty((time_steps, steps, num_points))
+control_angles[0] = np.linspace(control_angles_start, control_angles_end, num=steps)
+control_angles_time_inc = np.linspace(0.0, 2*math.pi, num=time_steps, endpoint=False)
+for i in range(time_steps):
+    control_angles[i] = control_angles[0] + control_angles_time_inc[i]
+
+print("-> Control Points")
+first_control_points = np.empty((time_steps, steps, num_points, 2))
+second_control_points = np.empty((time_steps, steps, num_points, 2))
+
+def find_control_radius(radius, num_points):
     return radius * math.sin(2*math.pi/num_points)
 
-# determine whether points p1 and p2 are on the same side of the segment defined by
-# s1 and s2. returns True for same side, False for opposite sides.
-# from https://stackoverflow.com/questions/28555246/finding-out-if-two-points-are-on-the-same-side
-def same_side(s1, s2, p1, p2):
-    return ((s1[1]-s2[1])*(p1[0]-s1[0])+(s2[0]-s1[0])*(p1[1]-s1[1]))*((s1[1]-s2[1])*(p2[0]-s1[0])+(s2[0]-s1[0])*(p2[1]-s1[1]))>0
+for time_step in range(time_steps):
+    for step in range(steps):
+        control_radius = find_control_radius(radii[step], num_points)
+        first_control_points[time_step][step] = [
+                [endpoints[step][i][0] - control_radius*math.cos(control_angles[time_step][step][i]),
+                 endpoints[step][i][1] - control_radius*math.sin(control_angles[time_step][step][i])]
+                for i in range(num_points)
+                ]
+        second_control_points[time_step][step] = [
+                [endpoints[step][i][0] + control_radius*math.cos(control_angles[time_step][step][i]),
+                 endpoints[step][i][1] + control_radius*math.sin(control_angles[time_step][step][i])]
+                for i in range(num_points)
+                ]
 
-im = Image.new(mode="RGB", size=(side_length, side_length))
-px = im.load()
+print("Restructuring data...")
+bezier_curves_per_frame = np.asfortranarray(np.empty((time_steps, steps*num_points, 2, 4)))
 
-for step in range(steps):
-    radius = radii[step] 
-    ctrl_angles = ctrl_angles_steps[step]
-    # points along big circle
-    points = [(center[0] + radius*math.cos(i*(2*math.pi/num_points)), center[1] + radius*math.sin(i*(2*math.pi/num_points))) for i in range(num_points)]
-    
-    ctrl_pts = []
-    for i in range(num_points):
-        ctrl_pts.append(
-                (points[i][0] + ctrl_radius(radius)*math.cos(ctrl_angles[i]), 
-                 points[i][1] + ctrl_radius(radius)*math.sin(ctrl_angles[i])))
-        ctrl_pts.append(
-                (points[i][0] - ctrl_radius(radius)*math.cos(ctrl_angles[i]),
-                 points[i][1] - ctrl_radius(radius)*math.sin(ctrl_angles[i])))
+# shitty way which i will make fast
+for time_step in range(time_steps):
+    for step in range(steps):
+        for i in range(num_points):
+            first_endpoint = endpoints[step][i-1]
+            first_control = second_control_points[time_step][step][i-1]
+            second_control = first_control_points[time_step][step][i]
+            second_endpoint = endpoints[step][i]
+            bezier_curves_per_frame[time_step][step*num_points+i] = np.transpose([first_endpoint, first_control, second_control, second_endpoint])
 
-    ctrl_pts.append(ctrl_pts.pop(0))
-    # Drawing Curve
-    for i in range(num_points):
-        draw_curve(px, points[i-1], points[i], [ctrl_pts[2*i], ctrl_pts[2*i+1]], 0, 20, 50)
+print("Constructing image frames...")
 
-im.save("out.png")
+# fixing colors: multiplying by opacity
+rendering_passes = [(p[0], (int(opacity*p[1][0]), int(opacity*p[1][1]), int(opacity*p[1][2]))) for p in rendering_passes]
+
+def draw_curve(pixels, nodes, rendering_passes, ndots):
+    curve = bezier.Curve(nodes, degree=3)
+    for p in rendering_passes:
+        noise = p[0]
+        color = p[1]
+        for s in np.arange(0, 1, 1.0/ndots):
+            px = curve.evaluate(np.random.normal(s, noise))
+            x = int(px[0][0])
+            y = int(px[1][0])
+            try:
+                current_px = pixels[x,y]
+                pixels[x,y] = (current_px[0]+color[0], current_px[1]+color[1], current_px[2]+color[2])
+            except IndexError:
+                pass
+
+for time_step in range(time_steps):
+    print(f"-> Frame {time_step}")
+    # set up bitmap to write to
+    im = Image.new(mode="RGB", size=(side_length, side_length))
+    px = im.load()
+
+    for curve in bezier_curves_per_frame[time_step]:
+        draw_curve(px, curve, rendering_passes, 50)
+
+    im.save(f"out_{time_step}.png")
+
+print("Combining into animated PNG...")
+files = [(f"out_{time_step}.png", 20) for time_step in range(time_steps)]
+im = APNG()
+for file, delay in files:
+    im.append_file(file, delay=delay)
+
+print("Done!")
+im.save("out_animated.png")
