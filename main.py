@@ -1,11 +1,13 @@
 import cairo
+import cv2
 import math
 from sys import argv
 from PIL import Image
 import bezier
 import numpy as np
-from apng import APNG
+from apng import APNG, PNG
 import random
+from io import BytesIO
 
 print("Processing constant parameters...")
 # global params, edit these
@@ -15,7 +17,7 @@ radius_max = 500 # pixels, outer radius
 steps = 400 # number of steps between inner and outer radius
 margin = 100 # pixels around border
 opacity = 20 # out of 255
-rendering_passes = [(0.1, (1, 0, 0)), (0.5, (0, 1, 0)), (0.2, (0, 0, 1)), (0.0, (1, 1, 1))] # (noise as stdev of bezier param, (R, G, B))
+rendering_passes = [(0.1, [1, 0, 0]), (0.25, [0, 1, 0]), (0.2, [0, 0, 1]), (0.0, [1, 1, 1])] # (noise as stdev of bezier param, [R, G, B])
 time_steps = 100 # time steps in animation
 ndots = 50 # number of dots created during a single pass while rasterizing a single bezier curve
 
@@ -37,7 +39,8 @@ print("-> Control Angles")
 #control_angles_start = [i*(2*math.pi/num_points) + math.pi*random.random()/2 for i in range(num_points)]
 control_angles_start = [2*math.pi*random.random() for i in range(num_points)]
 #control_angles_end = [i*(2*math.pi/num_points) + math.pi*random.random()/2 for i in range(num_points)]
-control_angles_end = [i*(2*math.pi/num_points) + math.pi/2 for i in range(num_points)]
+#control_angles_end = [i*(2*math.pi/num_points) + math.pi/2 for i in range(num_points)]
+control_angles_end = [2*math.pi*random.random() for i in range(num_points)]
 
 control_angles = np.empty((time_steps, steps, num_points))
 control_angles[0] = np.linspace(control_angles_start, control_angles_end, num=steps)
@@ -85,39 +88,33 @@ print("Constructing image frames...")
 rendering_passes = [(p[0], (int(opacity*p[1][0]), int(opacity*p[1][1]), int(opacity*p[1][2]))) for p in rendering_passes]
 bezier_param_values = np.arange(0, 1, 1.0/ndots)
 
-def draw_curve(pixels, nodes, rendering_passes, bezier_param_values):
-    curve = bezier.Curve(nodes, degree=3)
-    for p in rendering_passes:
-        noise = p[0]
-        color = p[1]
-        noise = np.random.normal(0, noise, len(bezier_param_values))
-        bezier_param_with_noise = bezier_param_values + noise
-        bezier_pixels = curve.evaluate_multi(bezier_param_with_noise)
-        for px in np.transpose(bezier_pixels):
-            x = int(px[0])
-            y = int(px[1])
-            try:
-                current_px = pixels[x,y]
-                pixels[x,y] = (current_px[0]+color[0], current_px[1]+color[1], current_px[2]+color[2])
-            except IndexError:
-                pass
+pixel_buffer_all_steps = np.zeros((time_steps, side_length, side_length, 3), dtype=np.uint8)
 
 for time_step in range(time_steps):
+    time_step_repeat = np.full(ndots, time_step, dtype=np.int64)
     print(f"-> Frame {time_step}")
-    # set up bitmap to write to
-    im = Image.new(mode="RGB", size=(side_length, side_length))
-    px = im.load()
+    for p in rendering_passes:
+        noise_param = p[0]
+        pixel_color = p[1]
+        for nodes in bezier_curves_per_frame[time_step]:
+            curve = bezier.Curve(nodes, degree=3)
+            bezier_param_with_noise = bezier_param_values + np.random.normal(0, noise_param, len(bezier_param_values))
+            bezier_output = curve.evaluate_multi(bezier_param_with_noise).astype(np.int64)
+            bezier_pixels = (time_step_repeat, bezier_output[0], bezier_output[1])
+            try:
+                np.add.at(pixel_buffer_all_steps, bezier_pixels, pixel_color)
+            except IndexError:
+                pass
+        
 
-    for curve in bezier_curves_per_frame[time_step]:
-        draw_curve(px, curve, rendering_passes, bezier_param_values)
+print("Writing video...")
 
-    im.save(f"out_{time_step}.png")
+size = side_length, side_length
+fps = 25
 
-print("Combining into animated PNG...")
-files = [(f"out_{time_step}.png", 20) for time_step in range(time_steps)]
-im = APNG()
-for file, delay in files:
-    im.append_file(file, delay=delay)
+out = cv2.VideoWriter('output.mp4', cv2.VideoWriter_fourcc(*'mp4v'), fps, (size[1], size[0]))
+for t in pixel_buffer_all_steps:
+    out.write(t)
+out.release()
 
 print("Done!")
-im.save("out_animated.png")
